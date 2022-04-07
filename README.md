@@ -3,4 +3,4 @@ The repository includes an example of propagating poses through SE(2) process mo
 
 The script heavily follows [this MATLAB script](https://github.com/UMich-CURLY-teaching/UMich-ROB-530-public/blob/main/code-examples/MATLAB/matrix_groups/odometry_propagation_se2.m) by [UMich-CURLY-teaching](https://github.com/UMich-CURLY-teaching).
 
-![scatterplot](trajectory_with_particles.png)
+![scatterplot](umbrella_plot.png)
