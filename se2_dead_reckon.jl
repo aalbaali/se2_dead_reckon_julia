@@ -45,6 +45,8 @@ default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 
 # Generate a new plot if this is true
 should_create_new_plot = true;
 
+# Plot trajectory
+should_plot_trajectory = false;
 ################################################################################
 # Constants
 ################################################################################
@@ -190,12 +192,16 @@ for k = 2:num_poses
     end
 end
 
-traj_x = map(T -> T[1, 3], traj_true);
-traj_y = map(T -> T[2, 3], traj_true);
-p = plot!(traj_x, traj_y, label = "Trajectory");
-xlabel!("x [m]");
-ylabel!("y [m]");
-display(p);
+if should_create_new_plot
+    plot();
+end
+
+if should_plot_trajectory
+    traj_x = map(T -> T[1, 3], traj_true);
+    traj_y = map(T -> T[2, 3], traj_true);
+    p = plot!(traj_x, traj_y, label = "Trajectory");    
+    display(p);
+end
 
 # Get the points of the last pose from all particles
 x = map(trajs -> trajs[end][1, 3], trajectories);
@@ -214,3 +220,6 @@ p2 = plot!(
     legend = :bottomleft,
 );
 display(p2);
+
+xlabel!("x [m]");
+ylabel!("y [m]");
