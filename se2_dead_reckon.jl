@@ -66,7 +66,7 @@ function wedge(ξ::Vector{Real})
 end
 
 # Adjoint function
-function Ad(X::Vector{Vector{Real}})
+function Ad(X::Matrix)
     return [X[1:2, 1:2] [X[2, 3]; -X[1, 3]]; [0 0 1]]
 end
 
@@ -74,6 +74,27 @@ end
 function ytraj(x::Real)
     return 0.1 * exp(0.6 * x) - 0.1
 end
+
+"""
+Retract/map covariance from Lie algebra onto the manifold
+"""
+function retractCovEllipse(T, Σ, α::Real, num_points=100)
+    ϕ = LinRange(-π, π, num_points);
+    circle = [cos.(ϕ) sin.(ϕ) zeros(length(ϕ))];
+    scale = sqrt(quantile(Chisq(3), 1 - α));
+    ellipse = Vector{Float64}[];
+
+    # Lower cholesky factor
+    L_xi = cholesky(Σ).L;
+    for p = 1:length(ϕ)
+        ell_se2 = scale * L_xi * circle[p, :]
+        T_pt = T * exp(collect(wedge(ell_se2)))
+        push!(ellipse, T_pt[1:2, 3])
+    end
+
+    return ellipse;
+end
+
 ################################################################################
 # Main code
 ################################################################################
@@ -179,22 +200,7 @@ y = map(trajs -> trajs[end][2, 3], trajectories);
 plt_scatter = scatter!(x, y, aspect_ratio = :equal, label = L"\mathbf{T}^{i}_{K}");
 display(plt_scatter)
 
-# Display uncertainty bounds
-ϕ = -π:0.01:π;
-circle = [cos.(ϕ) sin.(ϕ) zeros(length(ϕ))];
-scale = sqrt(quantile(Chisq(3), 1 - α));
-
-# Covariance ellipse on manifold
-# Get TRUE last pose
-T_end = traj_true[end];
-ellipse = Vector{Float64}[];
-# Lower cholesky factor
-L_xi = cholesky(Σ_xi).L;
-for p = 1:length(ϕ)
-    ell_se2 = scale * L_xi * circle[p, :]
-    T_pt = T_end * exp(collect(wedge(ell_se2)))
-    push!(ellipse, T_pt[1:2, 3])
-end
+ellipse = retractCovEllipse(traj_true[end], Σ_xi, α, 100);
 
 x_ellipse = map(v -> v[1], ellipse);
 y_ellipse = map(v -> v[2], ellipse);
