@@ -19,4 +19,5 @@ This may be due to simplified Jacobian computations (e.g., the left/right Jacobi
 ## Confidence bounds with and without (right) Jacobians
 As can be seen here, the effect is minimal for the presented example.
 Note that the effects may be more substantion for different examples.
+
 ![conf_with_and_without_jac](images/conf_bound_with_and_without_jacs.png)
