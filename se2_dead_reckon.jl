@@ -100,12 +100,13 @@ function retractCovEllipse(T, Σ, α::Real, num_points=100)
     return ellipse;
 end
 
-function plotEllipse!(ellipse)
+function plotEllipse!(ellipse; kwargs...)
     x_pts = map(v -> v[1], ellipse);
     y_pts = map(v -> v[2], ellipse);
     plt = plot!(
         x_pts,
-        y_pts
+        y_pts;
+        kwargs...
     );
     return plt;
 end
@@ -220,7 +221,7 @@ plt_scatter = scatter!(x, y, aspect_ratio = :equal, label = L"\mathbf{T}^{i}_{K}
 display(plt_scatter)
 
 ellipse = retractCovEllipse(traj_true[end], Σ_xi, α, 100);
-plt = plotEllipse!(ellipse);
+plt = plotEllipse!(ellipse, label = "$((1-α)*100)% confidence bounds", legend = :bottomleft);
 display(plt);
 
 xlabel!("x [m]");
