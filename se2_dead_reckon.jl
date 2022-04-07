@@ -20,9 +20,6 @@ dt = 0.5;
 # Sim stopping time
 t_end = 15;
 
-# Flag for using left/right Jacobians for computing the uncertainty bounds
-use_manifold_jacobians = true;
-
 # Use noise on group rather than Lie algebra (i.e., TₖExp(uₖ)Exp(wₖ) instead of TₖExp(uₖ + wₖ))
 noise_on_manifold = false;
 
@@ -66,7 +63,7 @@ function wraptoπ(θ::Real)
 end
 
 # se2 wedge operator
-function wedge(ξ::Vector{Real})
+function wedge(ξ::Vector)
     return sum(ξ .* G)
 end
 
@@ -149,8 +146,11 @@ for i = 1:num_particles
     push!(trajectories, [I(3)])
 end
 
-# State covariance of last pose
-Σ_xi = Σ_xi_0;
+# State covariance of last pose, with manifold (right) Jacobian
+Σ_xi_with_jac = Σ_xi_0;
+
+# State covariance of last pose, withOUT manifold (right) Jacobian
+Σ_xi_no_jac = Σ_xi_0;
 
 # Go over the trajectory
 for k = 2:num_poses
@@ -179,26 +179,24 @@ for k = 2:num_poses
             local A = Ad(inv(Ξ_km1))
 
             # Jacobian of process model w.r.t. process noise
-            if use_manifold_jacobians
-                # Using (68) and (163) from Sola
-                local θᵤ = wraptoπ(u_km1[3])
-                if θᵤ ≈ 0
-                    Jᵣ = I(3);
-                else
-                    J_so2_r = [sin(θᵤ)/θᵤ        (1-cos(θᵤ))/θᵤ;
-                               (cos(θᵤ)-1)/θᵤ    sin(θᵤ)/θᵤ];
-                    J_ρ_r = [(θᵤ * u_km1[1]-u_km1[2]+u_km1[2]cos(θᵤ)-u_km1[1]sin(θᵤ)) / θᵤ^2;
-                             (-u_km1[1] + θᵤ * u_km1[2] + u_km1[1]cos(θᵤ) - u_km1[2]sin(θᵤ)) / θᵤ^2];
-                    Jᵣ = [J_so2_r J_ρ_r;
-                          0 0 1];
-                end
-                L = dt * Jᵣ;
+            # Using (68) and (163) from Sola
+            local θᵤ = wraptoπ(u_km1[3])
+            if θᵤ ≈ 0
+                Jᵣ = I(3);
             else
-                L = dt * I(3);
+                J_so2_r = [sin(θᵤ)/θᵤ        (1-cos(θᵤ))/θᵤ;
+                            (cos(θᵤ)-1)/θᵤ    sin(θᵤ)/θᵤ];
+                J_ρ_r = [(θᵤ * u_km1[1]-u_km1[2]+u_km1[2]cos(θᵤ)-u_km1[1]sin(θᵤ)) / θᵤ^2;
+                            (-u_km1[1] + θᵤ * u_km1[2] + u_km1[1]cos(θᵤ) - u_km1[2]sin(θᵤ)) / θᵤ^2];
+                Jᵣ = [J_so2_r J_ρ_r;
+                        0 0 1];
             end
+            local L = dt * Jᵣ;
+            global Σ_xi_with_jac = Symmetric(A * Σ_xi_with_jac * A' + L * Σ_w * L')
 
-            # Update covariance
-            global Σ_xi = Symmetric(A * Σ_xi * A' + L * Σ_w * L')
+            # Covariance *without* using the Jacobians
+            local L = dt * I(3);
+            global Σ_xi_no_jac = Symmetric(A * Σ_xi_no_jac * A' + L * Σ_w * L')
         end
     end
 end
@@ -210,7 +208,7 @@ end
 if should_plot_trajectory
     traj_x = map(T -> T[1, 3], traj_true);
     traj_y = map(T -> T[2, 3], traj_true);
-    p = plot!(traj_x, traj_y, label = "Trajectory");    
+    p = plot!(traj_x, traj_y, label = "Trajectory");
     display(p);
 end
 
@@ -220,8 +218,14 @@ y = map(trajs -> trajs[end][2, 3], trajectories);
 plt_scatter = scatter!(x, y, aspect_ratio = :equal, label = L"\mathbf{T}^{i}_{K}");
 display(plt_scatter)
 
-ellipse = retractCovEllipse(traj_true[end], Σ_xi, α, 100);
-plt = plotEllipse!(ellipse, label = "$((1-α)*100)% confidence bounds", legend = :bottomleft);
+ellipse = retractCovEllipse(traj_true[end], Σ_xi_with_jac, α, 100);
+plt = plotEllipse!(ellipse, lab="$((1-α)*100)% confidence bounds, using (right) \$SE(2)\$ Jacobian",
+        legend=:bottomleft);
+display(plt);
+
+ellipse = retractCovEllipse(traj_true[end], Σ_xi_no_jac, α, 100);
+plt = plotEllipse!(ellipse, lab="$((1-α)*100)% confidence bounds, without (right) \$SE(2)\$ Jacobian",
+        legend=:bottomleft, lalpha=:0.5);
 display(plt);
 
 xlabel!("x [m]");
