@@ -11,12 +11,75 @@ using Distributions
 using Colors
 using LaTeXStrings
 
+################################################################################
+# Sim paramaters
+################################################################################
 # Sampling period
 dt = 0.5;
 
+# Sim stopping time
+t_end = 15;
+
+# Flag for using left/right Jacobians for computing the uncertainty bounds
+use_manifold_jacobians = true;
+
+# Use noise on group rather than Lie algebra (i.e., TₖExp(uₖ)Exp(wₖ) instead of TₖExp(uₖ + wₖ))
+noise_on_manifold = false;
+
+# Number of particles in the simulation
+num_particles = 1000;
+
+# Process model noise
+Σ_w = Diagonal([0.03, 0.03, 0.1] .^ 2);
+
+# Covaraince on initial state
+Σ_xi_0 = 1e-7 * I(3);
+
+# p-value for uncertainty bounds
+α = 0.001;
+
+# Plotting params
+plot_font = "Computer Modern"
+default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 1)
+
+################################################################################
+# Constants
+################################################################################
+# Generators
+G₁ = sparse([1], [3], 1, 3, 3);
+G₂ = sparse([2], [3], 1, 3, 3);
+G₃ = sparse([1, 2], [2, 1], [-1, 1], 3, 3);
+
+# Array of Generators
+G = [G₁, G₂, G₃];
+
+################################################################################
+# Supporting functios
+################################################################################
+function wraptoπ(θ::Real)
+    return (θ + π) % (2π) - π
+end
+
+# se2 wedge operator
+function wedge(ξ::Vector{Real})
+    return sum(ξ .* G)
+end
+
+# Adjoint function
+function Ad(X::Vector{Vector{Real}})
+    return [X[1:2, 1:2] [X[2, 3]; -X[1, 3]]; [0 0 1]]
+end
+
+# Y as a function of x
+function ytraj(x::Real)
+    return 0.1 * exp(0.6 * x) - 0.1
+end
+################################################################################
+# Main code
+################################################################################
 # Ground truth
-x_true = 0:dt:5;
-y_true = 0.1 * exp.(0.6 * collect(x_true)) .- 0.1;
+x_true = 0:dt:t_end;
+y_true = ytraj.(x_true);
 θ_true = map(i -> atan(y_true[i] - y_true[i-1], x_true[i] - x_true[i-1]), 2:length(x_true));
 pushfirst!(θ_true, 0);
 
@@ -29,30 +92,8 @@ u_mat_true = [diff(x_true)'; diff(y_true)'; diff(θ_true)'];
 # Convert to array of control inputs
 u_arr = mapslices(u_i -> [u_i], u_mat_true, dims = 1);
 
-# Number of particles in the simulation
-num_particles = 1000;
-
-# First order covariance propagation around the mean
-T_cov_fo = zeros(3, 3);
-
-# Process model noise
-Σ_w = Diagonal([0.03, 0.03, 0.1] .^ 2);
-
 # Cholesky factor for covaraince sampling
 L_w = cholesky(Σ_w).L;
-
-# Generators
-G₁ = sparse([1], [3], 1, 3, 3);
-G₂ = sparse([2], [3], 1, 3, 3);
-G₃ = sparse([1, 2], [2, 1], [-1, 1], 3, 3);
-# Array of Generators
-G = [G₁, G₂, G₃];
-
-# se2 wedge operator
-wedge(ξ::Vector{Float64}) = sum(ξ .* G);
-
-# Adjoint function
-Ad(X) = [X[1:2, 1:2] [X[2, 3]; -X[1, 3]]; [0 0 1]];
 
 # Noise-free trajectory
 traj_true = Array{Float64,2}[];
@@ -72,36 +113,58 @@ for i = 1:num_particles
 end
 
 # State covariance of last pose
-Σ_xi = 1e-7 * I(3);
+Σ_xi = Σ_xi_0;
 
 # Go over the trajectory
 for k = 2:num_poses
     for p = 1:num_particles
         # Get noisy measurement
-        u_km1 = u_arr[k-1] + L_w * randn(3)
+        w_km1 = L_w * randn(3)
+        u_km1 = u_arr[k-1];
+        if noise_on_manifold
+            W_km1 = exp(collect(wedge(w_km1)));
+        else
+            global u_km1 += w_km1;
+        end
         Ξ_km1 = exp(collect(wedge(dt * u_km1)))
 
+
         T_km1 = trajectories[p][k-1]
-        push!(trajectories[p], T_km1 * Ξ_km1)
+        if noise_on_manifold
+            push!(trajectories[p], T_km1 * Ξ_km1 * W_km1);
+        else
+            push!(trajectories[p], T_km1 * Ξ_km1);
+        end
 
         # Propagate covariance of last pose
         if p == num_particles
             # Jacobian of process model w.r.t. T_km1 (pose)
-            A = Ad(inv(Ξ_km1))
+            local A = Ad(inv(Ξ_km1))
 
-            # Jacobian of process model w.r.t. process noise          
-            L = dt * I(3)
+            # Jacobian of process model w.r.t. process noise
+            if use_manifold_jacobians
+                # Using (68) and (163) from Sola
+                local θᵤ = wraptoπ(u_km1[3])
+                if θᵤ ≈ 0
+                    Jᵣ = I(3);
+                else
+                    J_so2_r = [sin(θᵤ)/θᵤ        (1-cos(θᵤ))/θᵤ;
+                               (cos(θᵤ)-1)/θᵤ    sin(θᵤ)/θᵤ];
+                    J_ρ_r = [(θᵤ * u_km1[1]-u_km1[2]+u_km1[2]cos(θᵤ)-u_km1[1]sin(θᵤ)) / θᵤ^2;
+                             (-u_km1[1] + θᵤ * u_km1[2] + u_km1[1]cos(θᵤ) - u_km1[2]sin(θᵤ)) / θᵤ^2];
+                    Jᵣ = [J_so2_r J_ρ_r;
+                          0 0 1];
+                end
+                L = dt * Jᵣ;
+            else
+                L = dt * I(3);
+            end
 
             # Update covariance
             global Σ_xi = Symmetric(A * Σ_xi * A' + L * Σ_w * L')
         end
     end
 end
-
-# Generate plots
-plot_font = "Computer Modern"
-default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 1)
-scalefontsizes();
 
 traj_x = map(T -> T[1, 3], traj_true);
 traj_y = map(T -> T[2, 3], traj_true);
@@ -119,7 +182,6 @@ display(plt_scatter)
 # Display uncertainty bounds
 ϕ = -π:0.01:π;
 circle = [cos.(ϕ) sin.(ϕ) zeros(length(ϕ))];
-α = 0.001;
 scale = sqrt(quantile(Chisq(3), 1 - α));
 
 # Covariance ellipse on manifold
@@ -136,6 +198,10 @@ end
 
 x_ellipse = map(v -> v[1], ellipse);
 y_ellipse = map(v -> v[2], ellipse);
-p2 = plot!(x_ellipse, y_ellipse, label = "$((1-α)*100)% confidence bounds",
-            legend = :topleft);
+p2 = plot!(
+    x_ellipse,
+    y_ellipse,
+    label = "$((1-α)*100)% confidence bounds",
+    legend = :bottomleft,
+);
 display(p2);
