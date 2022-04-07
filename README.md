@@ -15,3 +15,8 @@ Note that for longer trajectories, the confidence bounds are no longer consisten
 This may be due to simplified Jacobian computations (e.g., the left/right Jacobians are *not* used).
 
 ![traj_with_inconsistent_bounds](images/long_traj_inconsistent_confidence_bounds.png)
+
+## Confidence bounds with and without (right) Jacobians
+As can be seen here, the effect is minimal for the presented example.
+Note that the effects may be more substantion for different examples.
+![conf_with_and_without_jac](images/conf_bound_with_and_without_jacs.png)
