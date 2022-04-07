@@ -42,6 +42,9 @@ num_particles = 1000;
 plot_font = "Computer Modern"
 default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 1)
 
+# Generate a new plot if this is true
+should_create_new_plot = true;
+
 ################################################################################
 # Constants
 ################################################################################
@@ -189,7 +192,7 @@ end
 
 traj_x = map(T -> T[1, 3], traj_true);
 traj_y = map(T -> T[2, 3], traj_true);
-p = plot(traj_x, traj_y, label = "Trajectory");
+p = plot!(traj_x, traj_y, label = "Trajectory");
 xlabel!("x [m]");
 ylabel!("y [m]");
 display(p);
