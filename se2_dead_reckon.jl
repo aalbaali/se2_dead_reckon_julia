@@ -6,14 +6,115 @@
 
 using LinearAlgebra
 using SparseArrays
+using Plots
+using Distributions
+using Colors
+using LaTeXStrings
 
+################################################################################
+# Sim paramaters
+################################################################################
 # Sampling period
-dt = 0.6;
+dt = 0.5;
 
+# Sim stopping time
+t_end = 15;
+
+# Use noise on group rather than Lie algebra (i.e., TₖExp(uₖ)Exp(wₖ) instead of TₖExp(uₖ + wₖ))
+noise_on_manifold = false;
+
+# Number of particles in the simulation
+num_particles = 1000;
+
+# Process model noise
+Σ_w = Diagonal([0.03, 0.03, 0.1] .^ 2);
+
+# Covaraince on initial state
+Σ_xi_0 = 1e-7 * I(3);
+
+# p-value for uncertainty bounds
+α = 0.001;
+
+# Plotting params
+plot_font = "Computer Modern"
+default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 1)
+
+# Generate a new plot if this is true
+should_create_new_plot = true;
+
+# Plot trajectory
+should_plot_trajectory = false;
+################################################################################
+# Constants
+################################################################################
+# Generators
+G₁ = sparse([1], [3], 1, 3, 3);
+G₂ = sparse([2], [3], 1, 3, 3);
+G₃ = sparse([1, 2], [2, 1], [-1, 1], 3, 3);
+
+# Array of Generators
+G = [G₁, G₂, G₃];
+
+################################################################################
+# Supporting functios
+################################################################################
+function wraptoπ(θ::Real)
+    return (θ + π) % (2π) - π
+end
+
+# se2 wedge operator
+function wedge(ξ::Vector)
+    return sum(ξ .* G)
+end
+
+# Adjoint function
+function Ad(X::Matrix)
+    return [X[1:2, 1:2] [X[2, 3]; -X[1, 3]]; [0 0 1]]
+end
+
+# Y as a function of x
+function ytraj(x::Real)
+    return 0.1 * exp(0.6 * x) - 0.1
+end
+
+"""
+Retract/map covariance from Lie algebra onto the manifold
+"""
+function retractCovEllipse(T, Σ, α::Real, num_points=100)
+    ϕ = LinRange(-π, π, num_points);
+    circle = [cos.(ϕ) sin.(ϕ) zeros(length(ϕ))];
+    scale = sqrt(quantile(Chisq(3), 1 - α));
+    ellipse = Vector{Float64}[];
+
+    # Lower cholesky factor
+    L_xi = cholesky(Σ).L;
+    for p = 1:length(ϕ)
+        ell_se2 = scale * L_xi * circle[p, :]
+        T_pt = T * exp(collect(wedge(ell_se2)))
+        push!(ellipse, T_pt[1:2, 3])
+    end
+
+    return ellipse;
+end
+
+function plotEllipse!(ellipse; kwargs...)
+    x_pts = map(v -> v[1], ellipse);
+    y_pts = map(v -> v[2], ellipse);
+    plt = plot!(
+        x_pts,
+        y_pts;
+        kwargs...
+    );
+    return plt;
+end
+
+################################################################################
+# Main code
+################################################################################
 # Ground truth
-x_true = 0:dt:4;
-y_true = 0.1 * exp.(0.6 * collect(x_true)) .- 0.1;
-θ_true = map(i->atan(y_true[i] - y_true[i-1], x_true[i] - x_true[i-1]), 2:length(x_true));
+x_true = 0:dt:t_end;
+y_true = ytraj.(x_true);
+θ_true = map(i -> atan(y_true[i] - y_true[i-1], x_true[i] - x_true[i-1]), 2:length(x_true));
 pushfirst!(θ_true, 0);
 
 # Number of poses
@@ -23,54 +124,109 @@ num_poses = length(x_true);
 u_mat_true = [diff(x_true)'; diff(y_true)'; diff(θ_true)'];
 
 # Convert to array of control inputs
-u_arr = mapslices(u_i->[u_i], u_mat_true, dims=1);
-
-# Number of particles in the simulation
-num_particles = 1000;
-
-# First order covariance propagation around the mean
-T_cov_fo = zeros(3, 3);
-
-# Initialize all robot poses
-T_all = map(x->I(3), x_true);
-
-# Process model noise
-Σ_w = Diagonal([0.03, 0.03, 0.1].^2);
+u_arr = mapslices(u_i -> [u_i], u_mat_true, dims = 1);
 
 # Cholesky factor for covaraince sampling
-L_w = cholesky(Q).L;
-
-# Generators
-G₁ = sparse([1], [3], 1, 3, 3);
-G₂ = sparse([2], [3], 1, 3, 3);
-G₃ = sparse([1, 2], [2, 1], [-1, 1], 3, 3);
-# Array of Generators
-G = [G₁, G₂, G₃];
-
-# se2 wedge operator
-wedge(ξ::Vector{Float64}) = sum(ξ .* G);
-
-# Adjoint function
-Ad(X) = [X[1:2, 1:2] [X[2, 3]; -X[1, 3]]; [0 0 1]];
+L_w = cholesky(Σ_w).L;
 
 # Noise-free trajectory
-poses_true = Array{Float64, 2}[];
-push!(poses_true, I(3));
+traj_true = Array{Float64,2}[];
+push!(traj_true, I(3));
 for k = 2:num_poses
-  U_km1 = wedge(dt * u_arr[k - 1]);  
-  Ξ_km1 = exp(collect(U_km1));
-  push!(poses_true, poses_true[k - 1] * Ξ_km1);
+    U_km1 = wedge(dt * u_arr[k-1])
+    Ξ_km1 = exp(collect(U_km1))
+    push!(traj_true, traj_true[k-1] * Ξ_km1)
 end
 
-# Temporar
-  
+# Noisy trajectories
+trajectories = Vector{Array{Float64}}[];
 
-# # Array of noise-free trajectories
-# trajs = Vector{Array{Float64, 2}}[];
+# Initialize trajectories
+for i = 1:num_particles
+    push!(trajectories, [I(3)])
+end
 
-# for i = 1:num_particles
-#   push!(trajs, [I(3)])
-# end
+# State covariance of last pose, with manifold (right) Jacobian
+Σ_xi_with_jac = Σ_xi_0;
 
-# Covariance on latest pose
-Σ_xi
+# State covariance of last pose, withOUT manifold (right) Jacobian
+Σ_xi_no_jac = Σ_xi_0;
+
+# Go over the trajectory
+for k = 2:num_poses
+    for p = 1:num_particles
+        # Get noisy measurement
+        w_km1 = L_w * randn(3)
+        u_km1 = u_arr[k-1];
+        if noise_on_manifold
+            W_km1 = exp(collect(wedge(w_km1)));
+        else
+            global u_km1 += w_km1;
+        end
+        Ξ_km1 = exp(collect(wedge(dt * u_km1)))
+
+
+        T_km1 = trajectories[p][k-1]
+        if noise_on_manifold
+            push!(trajectories[p], T_km1 * Ξ_km1 * W_km1);
+        else
+            push!(trajectories[p], T_km1 * Ξ_km1);
+        end
+
+        # Propagate covariance of last pose
+        if p == num_particles
+            # Jacobian of process model w.r.t. T_km1 (pose)
+            local A = Ad(inv(Ξ_km1))
+
+            # Jacobian of process model w.r.t. process noise
+            # Using (68) and (163) from Sola
+            local θᵤ = wraptoπ(u_km1[3])
+            if θᵤ ≈ 0
+                Jᵣ = I(3);
+            else
+                J_so2_r = [sin(θᵤ)/θᵤ        (1-cos(θᵤ))/θᵤ;
+                            (cos(θᵤ)-1)/θᵤ    sin(θᵤ)/θᵤ];
+                J_ρ_r = [(θᵤ * u_km1[1]-u_km1[2]+u_km1[2]cos(θᵤ)-u_km1[1]sin(θᵤ)) / θᵤ^2;
+                            (-u_km1[1] + θᵤ * u_km1[2] + u_km1[1]cos(θᵤ) - u_km1[2]sin(θᵤ)) / θᵤ^2];
+                Jᵣ = [J_so2_r J_ρ_r;
+                        0 0 1];
+            end
+            local L = dt * Jᵣ;
+            global Σ_xi_with_jac = Symmetric(A * Σ_xi_with_jac * A' + L * Σ_w * L')
+
+            # Covariance *without* using the Jacobians
+            local L = dt * I(3);
+            global Σ_xi_no_jac = Symmetric(A * Σ_xi_no_jac * A' + L * Σ_w * L')
+        end
+    end
+end
+
+if should_create_new_plot
+    plot();
+end
+
+if should_plot_trajectory
+    traj_x = map(T -> T[1, 3], traj_true);
+    traj_y = map(T -> T[2, 3], traj_true);
+    p = plot!(traj_x, traj_y, label = "Trajectory");
+    display(p);
+end
+
+# Get the points of the last pose from all particles
+x = map(trajs -> trajs[end][1, 3], trajectories);
+y = map(trajs -> trajs[end][2, 3], trajectories);
+plt_scatter = scatter!(x, y, aspect_ratio = :equal, label = L"\mathbf{T}^{i}_{K}");
+display(plt_scatter)
+
+ellipse = retractCovEllipse(traj_true[end], Σ_xi_with_jac, α, 100);
+plt = plotEllipse!(ellipse, lab="$((1-α)*100)% confidence bounds, using (right) \$SE(2)\$ Jacobian",
+        legend=:bottomleft);
+display(plt);
+
+ellipse = retractCovEllipse(traj_true[end], Σ_xi_no_jac, α, 100);
+plt = plotEllipse!(ellipse, lab="$((1-α)*100)% confidence bounds, without (right) \$SE(2)\$ Jacobian",
+        legend=:bottomleft, lalpha=:0.5);
+display(plt);
+
+xlabel!("x [m]");
+ylabel!("y [m]");
