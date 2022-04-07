@@ -5,7 +5,13 @@ The script heavily follows [this MATLAB script](https://github.com/UMich-CURLY-t
 
 # Generated plots
 ## Umbrella plot without covariance
-![scatterplot](umbrella_plot.png)
+![scatterplot](images/umbrella_plot.png)
 
 ## Trajectory with covariance
-![traj_with_cov](trajectory_with_cov.png)
+![traj_with_cov](images/trajectory_with_cov.png)
+
+## Long trajectory with confidence bounds
+Note that for longer trajectories, the confidence bounds are no longer consistent.
+This may be due to simplified Jacobian computations (e.g., the left/right Jacobians are *not* used).
+
+![traj_with_inconsistent_bounds](images/long_traj_inconsistent_confidence_bounds.png)
