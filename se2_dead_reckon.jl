@@ -15,7 +15,7 @@ using LaTeXStrings
 # Sim paramaters
 ################################################################################
 # Sampling period
-dt = 0.5;
+Δt = 0.5;
 
 # Sim stopping time
 t_end = 15;
