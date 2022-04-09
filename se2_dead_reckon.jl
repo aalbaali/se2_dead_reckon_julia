@@ -39,6 +39,9 @@ num_particles = 1000;
 plot_font = "Computer Modern"
 default(fontfamily = plot_font, linewidth = 2, grid = true, thickness_scaling = 1)
 
+# Plotting theme
+theme(:dark)
+
 # Generate a new plot if this is true
 should_create_new_plot = true;
 
@@ -112,7 +115,7 @@ end
 # Main code
 ################################################################################
 # Ground truth
-x_true = 0:dt:t_end;
+x_true = 0:Δt:t_end;
 y_true = ytraj.(x_true);
 θ_true = map(i -> atan(y_true[i] - y_true[i-1], x_true[i] - x_true[i-1]), 2:length(x_true));
 pushfirst!(θ_true, 0);
@@ -133,7 +136,7 @@ L_w = cholesky(Σ_w).L;
 traj_true = Array{Float64,2}[];
 push!(traj_true, I(3));
 for k = 2:num_poses
-    U_km1 = wedge(dt * u_arr[k-1])
+    U_km1 = wedge(Δt * u_arr[k-1])
     Ξ_km1 = exp(collect(U_km1))
     push!(traj_true, traj_true[k-1] * Ξ_km1)
 end
@@ -163,7 +166,7 @@ for k = 2:num_poses
         else
             global u_km1 += w_km1;
         end
-        Ξ_km1 = exp(collect(wedge(dt * u_km1)))
+        Ξ_km1 = exp(collect(wedge(Δt * u_km1)))
 
 
         T_km1 = trajectories[p][k-1]
@@ -191,11 +194,11 @@ for k = 2:num_poses
                 Jᵣ = [J_so2_r J_ρ_r;
                         0 0 1];
             end
-            local L = dt * Jᵣ;
+            local L = Δt * Jᵣ;
             global Σ_xi_with_jac = Symmetric(A * Σ_xi_with_jac * A' + L * Σ_w * L')
 
             # Covariance *without* using the Jacobians
-            local L = dt * I(3);
+            local L = Δt * I(3);
             global Σ_xi_no_jac = Symmetric(A * Σ_xi_no_jac * A' + L * Σ_w * L')
         end
     end
